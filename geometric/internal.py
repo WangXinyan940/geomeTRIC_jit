@@ -892,6 +892,22 @@ def nb_angle_derivatives(xyz, m, o, n):
     derivatives[o, :] = -(term1 + term2)
     return derivatives
 
+@nb.njit
+def nb_angle_val(xyz, a, b, c):
+    # vector from first atom to central atom
+    vector1 = xyz[a] - xyz[b]
+    # vector from last atom to central atom
+    vector2 = xyz[c] - xyz[b]
+    # norm of the two vectors
+    norm1 = np.sqrt(fast_sum(vector1**2))
+    norm2 = np.sqrt(fast_sum(vector2**2))
+    dot = fast_dot(vector1, vector2)
+    # Catch the edge case that very rarely this number is -1.
+    if dot / (norm1 * norm2) <= -1.0:
+        return np.pi
+    if dot / (norm1 * norm2) >= 1.0:
+        return 0.0
+    return np.arccos(dot / (norm1 * norm2))
 
 class Angle(PrimitiveCoordinate):
     def __init__(self, a, b, c):
@@ -925,24 +941,25 @@ class Angle(PrimitiveCoordinate):
         a = self.a
         b = self.b
         c = self.c
-        # vector from first atom to central atom
-        vector1 = xyz[a] - xyz[b]
-        # vector from last atom to central atom
-        vector2 = xyz[c] - xyz[b]
-        # norm of the two vectors
-        norm1 = np.sqrt(fast_sum(vector1**2))
-        norm2 = np.sqrt(fast_sum(vector2**2))
-        dot = fast_dot(vector1, vector2)
-        # Catch the edge case that very rarely this number is -1.
-        if dot / (norm1 * norm2) <= -1.0:
-            if (np.abs(dot / (norm1 * norm2)) + 1.0) < -1e-6:
-                raise RuntimeError('Encountered invalid value in angle')
-            return np.pi
-        if dot / (norm1 * norm2) >= 1.0:
-            if (np.abs(dot / (norm1 * norm2)) - 1.0) > 1e-6:
-                raise RuntimeError('Encountered invalid value in angle')
-            return 0.0
-        return np.arccos(dot / (norm1 * norm2))
+        # # vector from first atom to central atom
+        # vector1 = xyz[a] - xyz[b]
+        # # vector from last atom to central atom
+        # vector2 = xyz[c] - xyz[b]
+        # # norm of the two vectors
+        # norm1 = np.sqrt(fast_sum(vector1**2))
+        # norm2 = np.sqrt(fast_sum(vector2**2))
+        # dot = fast_dot(vector1, vector2)
+        # # Catch the edge case that very rarely this number is -1.
+        # if dot / (norm1 * norm2) <= -1.0:
+        #     if (np.abs(dot / (norm1 * norm2)) + 1.0) < -1e-6:
+        #         raise RuntimeError('Encountered invalid value in angle')
+        #     return np.pi
+        # if dot / (norm1 * norm2) >= 1.0:
+        #     if (np.abs(dot / (norm1 * norm2)) - 1.0) > 1e-6:
+        #         raise RuntimeError('Encountered invalid value in angle')
+        #     return 0.0
+        # return np.arccos(dot / (norm1 * norm2))
+        return nb_angle_val(xyz, a, b, c)
 
     def normal_vector(self, xyz):
         xyz = xyz.reshape(-1,3)
