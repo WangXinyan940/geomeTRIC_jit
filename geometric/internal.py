@@ -48,7 +48,42 @@ from geometric.molecule import Molecule, Elements, Radii
 from geometric.nifty import click, commadash, ang2bohr, bohr2ang, logger, pvec1d, pmat2d
 from geometric.rotate import get_expmap, get_expmap_der, calc_rot_vec_diff, get_quat, build_F, sorted_eigh
 
+import numba as nb
+
+@nb.jit
+def fast_dot(A, B):
+    return np.dot(A, B)
+
+@nb.njit
+def fast_svd(G):
+    U, S, VT = np.linalg.svd(G)
+    return U, S, VT
+
+@nb.njit
+def fast_inv(G):
+    return np.linalg.inv(G)
+
+@nb.njit
+def fast_cross(a, b):
+    """
+    Fast cross product for numba
+    """
+    c = np.zeros(3)
+    c[0] = a[1]*b[2]-a[2]*b[1]
+    c[1] = a[2]*b[0]-a[0]*b[2]
+    c[2] = a[0]*b[1]-a[1]*b[0]
+    return c
+
+@nb.njit
+def fast_sum(a):
+    a_ravel = a.ravel()
+    sval = 0.0
+    for ii in range(len(a_ravel)):
+        sval += a_ravel[ii]
+    return sval
+
 ## Some vector calculus functions
+@nb.njit
 def unit_vector(a):
     """
     Vector function: Given a vector a, return the unit vector
@@ -61,6 +96,7 @@ def d_unit_vector(a, ndim=3):
     answer = term1-term2
     return answer
 
+@nb.njit
 def d_cross(a, b):
     """
     Given two vectors a and b, return the gradient of the cross product axb w/r.t. a.
@@ -71,9 +107,10 @@ def d_cross(a, b):
     for i in range(3):
         ei = np.zeros(3, dtype=float)
         ei[i] = 1.0
-        d_cross[i] = np.cross(ei, b)
+        d_cross[i] = fast_cross(ei, b)
     return d_cross
 
+@nb.njit
 def d_cross_ab(a, b, da, db):
     """
     Given two vectors a, b and their derivatives w/r.t. a parameter, return the derivative
@@ -81,33 +118,37 @@ def d_cross_ab(a, b, da, db):
     """
     answer = np.zeros((da.shape[0], 3), dtype=float)
     for i in range(da.shape[0]):
-        answer[i] = np.cross(a, db[i]) + np.cross(da[i], b)
+        answer[i] = fast_cross(a, db[i]) + fast_cross(da[i], b)
     return answer
 
+@nb.njit
 def ncross(a, b):
     """
     Scalar function: Given vectors a and b, return the norm of the cross product
     """
-    cross = np.cross(a, b)
+    cross = fast_cross(a, b)
     return np.linalg.norm(cross)
 
+@nb.njit
 def d_ncross(a, b):
     """
     Return the gradient of the norm of the cross product w/r.t. a
     """
-    ncross = np.linalg.norm(np.cross(a, b))
+    ncross = np.linalg.norm(fast_cross(a, b))
     term1 = a * np.dot(b, b)
     term2 = -b * np.dot(a, b)
     answer = (term1+term2)/ncross
     return answer
 
+@nb.njit
 def nudot(a, b):
     r"""
     Given two vectors a and b, return the dot product (\hat{a}).b.
     """
     ev = a / np.linalg.norm(a)
     return np.dot(ev, b)
-    
+
+@nb.njit
 def d_nudot(a, b):
     r"""
     Given two vectors a and b, return the gradient of 
@@ -115,13 +156,15 @@ def d_nudot(a, b):
     """
     return np.dot(d_unit_vector(a), b)
 
+@nb.njit
 def ucross(a, b):
     r"""
     Given two vectors a and b, return the cross product (\hat{a})xb.
     """
     ev = a / np.linalg.norm(a)
-    return np.cross(ev, b)
+    return fast_cross(ev, b)
     
+@nb.njit
 def d_ucross(a, b):
     r"""
     Given two vectors a and b, return the gradient of 
@@ -130,13 +173,15 @@ def d_ucross(a, b):
     ev = a / np.linalg.norm(a)
     return np.dot(d_unit_vector(a), d_cross(ev, b))
 
+@nb.njit
 def nucross(a, b):
     r"""
     Given two vectors a and b, return the norm of the cross product (\hat{a})xb.
     """
     ev = a / np.linalg.norm(a)
-    return np.linalg.norm(np.cross(ev, b))
-    
+    return np.linalg.norm(fast_cross(ev, b))
+
+@nb.njit
 def d_nucross(a, b):
     r"""
     Given two vectors a and b, return the gradient of 
@@ -315,7 +360,7 @@ class TranslationX(PrimitiveCoordinate):
     def __eq__(self, other):
         if type(self) is not type(other): return False
         eq = set(self.a) == set(other.a)
-        if eq and np.sum((self.w-other.w)**2) > 1e-6:
+        if eq and fast_sum((self.w-other.w)**2) > 1e-6:
             logger.warning("Warning: TranslationX same atoms, different weights\n")
             eq = False
         return eq
@@ -326,7 +371,7 @@ class TranslationX(PrimitiveCoordinate):
     def value(self, xyz):
         xyz = xyz.reshape(-1,3)
         a = np.array(self.a)
-        return np.sum(xyz[a,0]*self.w)
+        return fast_sum(xyz[a,0]*self.w)
 
     def calcDiff(self, xyz1, xyz2=None, val2=None):
         # Translation ICs require an explicit implementation of calcDiff
@@ -367,7 +412,7 @@ class TranslationY(object):
     def __eq__(self, other):
         if type(self) is not type(other): return False
         eq = set(self.a) == set(other.a)
-        if eq and np.sum((self.w-other.w)**2) > 1e-6:
+        if eq and fast_sum((self.w-other.w)**2) > 1e-6:
             logger.warning("Warning: TranslationY same atoms, different weights\n")
             eq = False
         return eq
@@ -378,7 +423,7 @@ class TranslationY(object):
     def value(self, xyz):
         xyz = xyz.reshape(-1,3)
         a = np.array(self.a)
-        return np.sum(xyz[a,1]*self.w)
+        return fast_sum(xyz[a,1]*self.w)
 
     def calcDiff(self, xyz1, xyz2=None, val2=None):
         # Translation ICs require an explicit implementation of calcDiff
@@ -419,7 +464,7 @@ class TranslationZ(PrimitiveCoordinate):
     def __eq__(self, other):
         if type(self) is not type(other): return False
         eq = set(self.a) == set(other.a)
-        if eq and np.sum((self.w-other.w)**2) > 1e-6:
+        if eq and fast_sum((self.w-other.w)**2) > 1e-6:
             logger.warning("Warning: TranslationZ same atoms, different weights\n")
             eq = False
         return eq
@@ -430,7 +475,7 @@ class TranslationZ(PrimitiveCoordinate):
     def value(self, xyz):
         xyz = xyz.reshape(-1,3)
         a = np.array(self.a)
-        return np.sum(xyz[a,2]*self.w)
+        return fast_sum(xyz[a,2]*self.w)
         
     def calcDiff(self, xyz1, xyz2=None, val2=None):
         # Translation ICs require an explicit implementation of calcDiff
@@ -493,7 +538,7 @@ class Rotator(object):
     def __eq__(self, other):
         if type(self) is not type(other): return False
         eq = set(self.a) == set(other.a)
-        if eq and np.sum((self.x0-other.x0)**2) > 1e-6:
+        if eq and fast_sum((self.x0-other.x0)**2) > 1e-6:
             logger.warning("Warning: Rotator same atoms, different reference positions\n")
         return eq
 
@@ -541,7 +586,7 @@ class Rotator(object):
             y = self.x0[self.a, :].copy()
             y = y - np.mean(y,axis=0)
             q = get_quat(x, y, r=self.rnorm*self.rquat)
-            ang = 2*np.arccos(np.dot(self.rquat, q))
+            ang = 2*np.arccos(fast_dot(self.rquat, q))
             # self.qsav = q.copy()
             if ang > 0.9*np.pi:
                 logger.info("%s angle %.3f\n" % (str(self), ang))
@@ -790,7 +835,7 @@ class Distance(PrimitiveCoordinate):
         xyz = xyz.reshape(-1,3)
         a = self.a
         b = self.b
-        return np.sqrt(np.sum((xyz[a]-xyz[b])**2))
+        return np.sqrt(fast_sum((xyz[a]-xyz[b])**2))
     
     def derivative(self, xyz):
         xyz = xyz.reshape(-1,3)
@@ -816,6 +861,38 @@ class Distance(PrimitiveCoordinate):
         deriv2[n, :, m, :] = mtx
         return deriv2
     
+
+@nb.njit
+def nb_angle_derivatives(xyz, m, o, n):
+    derivatives = np.zeros_like(xyz)
+    # Unit displacement vectors
+    u_prime = (xyz[m] - xyz[o])
+    u_norm = np.linalg.norm(u_prime)
+    v_prime = (xyz[n] - xyz[o])
+    v_norm = np.linalg.norm(v_prime)
+    u = u_prime / u_norm
+    v = v_prime / v_norm
+    VECTOR1 = np.array([1, -1, 1]) / np.sqrt(3)
+    VECTOR2 = np.array([-1, 1, 1]) / np.sqrt(3)
+    if np.linalg.norm(u + v) < 1e-10 or np.linalg.norm(u - v) < 1e-10:
+        # if they're parallel
+        if ((np.linalg.norm(u + VECTOR1) < 1e-10) or
+                (np.linalg.norm(u - VECTOR2) < 1e-10)):
+            # and they're parallel o [1, -1, 1]
+            w_prime = fast_cross(u, VECTOR2)
+        else:
+            w_prime = fast_cross(u, VECTOR1)
+    else:
+        w_prime = fast_cross(u, v)
+    w = w_prime / np.linalg.norm(w_prime)
+    term1 = fast_cross(u, w) / u_norm
+    term2 = fast_cross(w, v) / v_norm
+    derivatives[m, :] = term1
+    derivatives[n, :] = term2
+    derivatives[o, :] = -(term1 + term2)
+    return derivatives
+
+
 class Angle(PrimitiveCoordinate):
     def __init__(self, a, b, c):
         self.a = a
@@ -853,9 +930,9 @@ class Angle(PrimitiveCoordinate):
         # vector from last atom to central atom
         vector2 = xyz[c] - xyz[b]
         # norm of the two vectors
-        norm1 = np.sqrt(np.sum(vector1**2))
-        norm2 = np.sqrt(np.sum(vector2**2))
-        dot = np.dot(vector1, vector2)
+        norm1 = np.sqrt(fast_sum(vector1**2))
+        norm2 = np.sqrt(fast_sum(vector2**2))
+        dot = fast_dot(vector1, vector2)
         # Catch the edge case that very rarely this number is -1.
         if dot / (norm1 * norm2) <= -1.0:
             if (np.abs(dot / (norm1 * norm2)) + 1.0) < -1e-6:
@@ -877,43 +954,44 @@ class Angle(PrimitiveCoordinate):
         # vector from last atom to central atom
         vector2 = xyz[c] - xyz[b]
         # norm of the two vectors
-        norm1 = np.sqrt(np.sum(vector1**2))
-        norm2 = np.sqrt(np.sum(vector2**2))
-        crs = np.cross(vector1, vector2)
+        norm1 = np.sqrt(fast_sum(vector1**2))
+        norm2 = np.sqrt(fast_sum(vector2**2))
+        crs = fast_cross(vector1, vector2)
         crs /= np.linalg.norm(crs)
         return crs
         
     def derivative(self, xyz):
         xyz = xyz.reshape(-1,3)
-        derivatives = np.zeros_like(xyz)
+        # derivatives = np.zeros_like(xyz)
         m = self.a
         o = self.b
         n = self.c
         # Unit displacement vectors
-        u_prime = (xyz[m] - xyz[o])
-        u_norm = np.linalg.norm(u_prime)
-        v_prime = (xyz[n] - xyz[o])
-        v_norm = np.linalg.norm(v_prime)
-        u = u_prime / u_norm
-        v = v_prime / v_norm
-        VECTOR1 = np.array([1, -1, 1]) / np.sqrt(3)
-        VECTOR2 = np.array([-1, 1, 1]) / np.sqrt(3)
-        if np.linalg.norm(u + v) < 1e-10 or np.linalg.norm(u - v) < 1e-10:
-            # if they're parallel
-            if ((np.linalg.norm(u + VECTOR1) < 1e-10) or
-                    (np.linalg.norm(u - VECTOR2) < 1e-10)):
-                # and they're parallel o [1, -1, 1]
-                w_prime = np.cross(u, VECTOR2)
-            else:
-                w_prime = np.cross(u, VECTOR1)
-        else:
-            w_prime = np.cross(u, v)
-        w = w_prime / np.linalg.norm(w_prime)
-        term1 = np.cross(u, w) / u_norm
-        term2 = np.cross(w, v) / v_norm
-        derivatives[m, :] = term1
-        derivatives[n, :] = term2
-        derivatives[o, :] = -(term1 + term2)
+        # u_prime = (xyz[m] - xyz[o])
+        # u_norm = np.linalg.norm(u_prime)
+        # v_prime = (xyz[n] - xyz[o])
+        # v_norm = np.linalg.norm(v_prime)
+        # u = u_prime / u_norm
+        # v = v_prime / v_norm
+        # VECTOR1 = np.array([1, -1, 1]) / np.sqrt(3)
+        # VECTOR2 = np.array([-1, 1, 1]) / np.sqrt(3)
+        # if np.linalg.norm(u + v) < 1e-10 or np.linalg.norm(u - v) < 1e-10:
+        #     # if they're parallel
+        #     if ((np.linalg.norm(u + VECTOR1) < 1e-10) or
+        #             (np.linalg.norm(u - VECTOR2) < 1e-10)):
+        #         # and they're parallel o [1, -1, 1]
+        #         w_prime = fast_cross(u, VECTOR2)
+        #     else:
+        #         w_prime = fast_cross(u, VECTOR1)
+        # else:
+        #     w_prime = fast_cross(u, v)
+        # w = w_prime / np.linalg.norm(w_prime)
+        # term1 = fast_cross(u, w) / u_norm
+        # term2 = fast_cross(w, v) / v_norm
+        # derivatives[m, :] = term1
+        # derivatives[n, :] = term2
+        # derivatives[o, :] = -(term1 + term2)
+        derivatives = nb_angle_derivatives(xyz, m, o, n)
         return derivatives
 
     def second_derivative(self, xyz):
@@ -933,7 +1011,7 @@ class Angle(PrimitiveCoordinate):
         if np.linalg.norm(u + v) < 1e-10 or np.linalg.norm(u - v) < 1e-10:
             return deriv2
         # cosine and sine of the bond angle
-        cq = np.dot(u, v)
+        cq = fast_dot(u, v)
         sq = np.sqrt(1-cq**2)
         uu = np.outer(u, u)
         uv = np.outer(u, v)
@@ -980,7 +1058,7 @@ class LinearAngle(PrimitiveCoordinate):
         ex = np.array([1.0,0.0,0.0])
         ey = np.array([0.0,1.0,0.0])
         ez = np.array([0.0,0.0,1.0])
-        self.e0 = [ex, ey, ez][np.argmin([np.dot(i, ev)**2 for i in [ex, ey, ez]])]
+        self.e0 = [ex, ey, ez][np.argmin([fast_dot(i, ev)**2 for i in [ex, ey, ez]])]
         self.stored_dot2 = 0.0
 
     def reposition_e0(self, xyz):
@@ -996,7 +1074,7 @@ class LinearAngle(PrimitiveCoordinate):
         c = self.c
         v = xyz[c] - xyz[a]
         ev = v / np.linalg.norm(v)
-        dot = np.dot(ev, self.e0)
+        dot = fast_dot(ev, self.e0)
         self.e0 -= dot*ev
         self.e0 /= np.linalg.norm(self.e0)
 
@@ -1034,11 +1112,11 @@ class LinearAngle(PrimitiveCoordinate):
         ev = v / np.linalg.norm(v)
         if self.e0 is None: self.reset(xyz)
         e0 = self.e0
-        self.stored_dot2 = np.dot(ev, e0)**2
+        self.stored_dot2 = fast_dot(ev, e0)**2
         # Now make two unit vectors that are perpendicular to this one.
-        c1 = np.cross(ev, e0)
+        c1 = fast_cross(ev, e0)
         e1 = c1 / np.linalg.norm(c1)
-        c2 = np.cross(ev, e1)
+        c2 = fast_cross(ev, e1)
         e2 = c2 / np.linalg.norm(c2)
         # BA and BC unit vectors in ABC angle
         vba = xyz[a]-xyz[b]
@@ -1046,9 +1124,9 @@ class LinearAngle(PrimitiveCoordinate):
         vbc = xyz[c]-xyz[b]
         ebc = vbc / np.linalg.norm(vbc)
         if self.axis == 0:
-            answer = np.dot(eba, e1) + np.dot(ebc, e1)
+            answer = fast_dot(eba, e1) + fast_dot(ebc, e1)
         else:
-            answer = np.dot(eba, e2) + np.dot(ebc, e2)
+            answer = fast_dot(eba, e2) + fast_dot(ebc, e2)
         return answer
 
     def visualize(self, xyz):
@@ -1063,11 +1141,11 @@ class LinearAngle(PrimitiveCoordinate):
         ev = v / np.linalg.norm(v)
         if self.e0 is None: self.reset(xyz)
         e0 = self.e0
-        self.stored_dot2 = np.dot(ev, e0)**2
+        self.stored_dot2 = fast_dot(ev, e0)**2
         # Now make two unit vectors that are perpendicular to this one.
-        c1 = np.cross(ev, e0)
+        c1 = fast_cross(ev, e0)
         e1 = c1 / np.linalg.norm(c1)
-        c2 = np.cross(ev, e1)
+        c2 = fast_cross(ev, e1)
         e2 = c2 / np.linalg.norm(c2)
         # Visualize the rotated unit vectors.
         answer = np.zeros((3, 3), dtype=float)
@@ -1098,9 +1176,9 @@ class LinearAngle(PrimitiveCoordinate):
         ev = v / np.linalg.norm(v)
         if self.e0 is None: self.reset(xyz)
         e0 = self.e0
-        c1 = np.cross(ev, e0)
+        c1 = fast_cross(ev, e0)
         e1 = c1 / np.linalg.norm(c1)
-        c2 = np.cross(ev, e1)
+        c2 = fast_cross(ev, e1)
         e2 = c2 / np.linalg.norm(c2)
         # BA and BC unit vectors in ABC angle
         vba = xyz[a]-xyz[b]
@@ -1111,19 +1189,19 @@ class LinearAngle(PrimitiveCoordinate):
         de0 = np.zeros((3, 3), dtype=float)
         dev = d_unit_vector(v)
         dc1 = d_cross_ab(ev, e0, dev, de0)
-        de1 = np.dot(dc1, d_unit_vector(c1))
+        de1 = fast_dot(dc1, d_unit_vector(c1))
         dc2 = d_cross_ab(ev, e1, dev, de1)
-        de2 = np.dot(dc2, d_unit_vector(c2))
+        de2 = fast_dot(dc2, d_unit_vector(c2))
         deba = d_unit_vector(vba)
         debc = d_unit_vector(vbc)
         if self.axis == 0:
-            derivatives[a, :] = np.dot(deba, e1) + np.dot(-de1, eba) + np.dot(-de1, ebc)
-            derivatives[b, :] = np.dot(-deba, e1) + np.dot(-debc, e1)
-            derivatives[c, :] = np.dot(de1, eba) + np.dot(de1, ebc) + np.dot(debc, e1)
+            derivatives[a, :] = fast_dot(deba, e1) + fast_dot(-de1, eba) + fast_dot(-de1, ebc)
+            derivatives[b, :] = fast_dot(-deba, e1) + fast_dot(-debc, e1)
+            derivatives[c, :] = fast_dot(de1, eba) + fast_dot(de1, ebc) + fast_dot(debc, e1)
         else:
-            derivatives[a, :] = np.dot(deba, e2) + np.dot(-de2, eba) + np.dot(-de2, ebc)
-            derivatives[b, :] = np.dot(-deba, e2) + np.dot(-debc, e2)
-            derivatives[c, :] = np.dot(de2, eba) + np.dot(de2, ebc) + np.dot(debc, e2)
+            derivatives[a, :] = fast_dot(deba, e2) + fast_dot(-de2, eba) + fast_dot(-de2, ebc)
+            derivatives[b, :] = fast_dot(-deba, e2) + fast_dot(-debc, e2)
+            derivatives[c, :] = fast_dot(de2, eba) + fast_dot(de2, ebc) + fast_dot(debc, e2)
         ## Finite difference derivatives
         ## if np.linalg.norm(derivatives - fderivatives) > 1e-6:
         ##     print np.linalg.norm(derivatives - fderivatives)
@@ -1194,9 +1272,9 @@ class MultiAngle(PrimitiveCoordinate): # pragma: no cover
         # vector from last atom to central atom
         vector2 = xyzc - xyz[b]
         # norm of the two vectors
-        norm1 = np.sqrt(np.sum(vector1**2))
-        norm2 = np.sqrt(np.sum(vector2**2))
-        dot = np.dot(vector1, vector2)
+        norm1 = np.sqrt(fast_sum(vector1**2))
+        norm2 = np.sqrt(fast_sum(vector2**2))
+        dot = fast_dot(vector1, vector2)
         # Catch the edge case that very rarely this number is -1.
         if dot / (norm1 * norm2) <= -1.0:
             if (np.abs(dot / (norm1 * norm2)) + 1.0) < -1e-6:
@@ -1216,9 +1294,9 @@ class MultiAngle(PrimitiveCoordinate): # pragma: no cover
         # vector from last atom to central atom
         vector2 = xyzc - xyz[b]
         # norm of the two vectors
-        norm1 = np.sqrt(np.sum(vector1**2))
-        norm2 = np.sqrt(np.sum(vector2**2))
-        crs = np.cross(vector1, vector2)
+        norm1 = np.sqrt(fast_sum(vector1**2))
+        norm2 = np.sqrt(fast_sum(vector2**2))
+        crs = fast_cross(vector1, vector2)
         crs /= np.linalg.norm(crs)
         return crs
         
@@ -1244,14 +1322,14 @@ class MultiAngle(PrimitiveCoordinate): # pragma: no cover
             if ((np.linalg.norm(u + VECTOR1) < 1e-10) or
                     (np.linalg.norm(u - VECTOR2) < 1e-10)):
                 # and they're parallel o [1, -1, 1]
-                w_prime = np.cross(u, VECTOR2)
+                w_prime = fast_cross(u, VECTOR2)
             else:
-                w_prime = np.cross(u, VECTOR1)
+                w_prime = fast_cross(u, VECTOR1)
         else:
-            w_prime = np.cross(u, v)
+            w_prime = fast_cross(u, v)
         w = w_prime / np.linalg.norm(w_prime)
-        term1 = np.cross(u, w) / u_norm
-        term2 = np.cross(w, v) / v_norm
+        term1 = fast_cross(u, w) / u_norm
+        term2 = fast_cross(w, v) / v_norm
         for i in m:
             derivatives[i, :] = term1/len(m)
         for i in n:
@@ -1261,6 +1339,54 @@ class MultiAngle(PrimitiveCoordinate): # pragma: no cover
     
     def second_derivative(self, xyz):
         raise NotImplementedError("Second derivatives have not been implemented for IC type %s" % self.__name__)
+
+
+@nb.njit
+def nb_dih_val_inner(xyz, a, b, c, d):
+    vec1 = xyz[b] - xyz[a]
+    vec2 = xyz[c] - xyz[b]
+    vec3 = xyz[d] - xyz[c]
+    cross1 = fast_cross(vec2, vec3)
+    cross2 = fast_cross(vec1, vec2)
+    arg1 = fast_sum(np.multiply(vec1, cross1)) * \
+            np.sqrt(fast_sum(vec2**2))
+    arg2 = fast_sum(np.multiply(cross1, cross2))
+    answer = np.arctan2(arg1, arg2)
+    return answer
+
+@nb.njit
+def nb_dih_deri_inner(xyz, m, o, p, n):
+    derivatives = np.zeros_like(xyz)
+    u_prime = (xyz[m] - xyz[o])
+    w_prime = (xyz[p] - xyz[o])
+    v_prime = (xyz[n] - xyz[p])
+    u_norm = np.linalg.norm(u_prime)
+    w_norm = np.linalg.norm(w_prime)
+    v_norm = np.linalg.norm(v_prime)
+    u = u_prime / u_norm
+    w = w_prime / w_norm
+    v = v_prime / v_norm
+    if (1 - fast_dot(u, w)**2) < 1e-6:
+        term1 = fast_cross(u, w) * 0
+        term3 = fast_cross(u, w) * 0
+    else:
+        term1 = fast_cross(u, w) / (u_norm * (1 - fast_dot(u, w)**2))
+        term3 = fast_cross(u, w) * fast_dot(u, w) / (w_norm * (1 - fast_dot(u, w)**2))
+    if (1 - fast_dot(v, w)**2) < 1e-6:
+        term2 = fast_cross(v, w) * 0
+        term4 = fast_cross(v, w) * 0
+    else:
+        term2 = fast_cross(v, w) / (v_norm * (1 - fast_dot(v, w)**2))
+        term4 = fast_cross(v, w) * fast_dot(v, w) / (w_norm * (1 - fast_dot(v, w)**2))
+    # term1 = fast_cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
+    # term2 = fast_cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
+    # term3 = fast_cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
+    # term4 = fast_cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
+    derivatives[m, :] = term1
+    derivatives[n, :] = -term2
+    derivatives[o, :] = -term1 + term3 - term4
+    derivatives[p, :] = term2 - term3 + term4
+    return derivatives
 
 class Dihedral(PrimitiveCoordinate):
     def __init__(self, a, b, c, d):
@@ -1299,53 +1425,55 @@ class Dihedral(PrimitiveCoordinate):
         b = self.b
         c = self.c
         d = self.d
-        vec1 = xyz[b] - xyz[a]
-        vec2 = xyz[c] - xyz[b]
-        vec3 = xyz[d] - xyz[c]
-        cross1 = np.cross(vec2, vec3)
-        cross2 = np.cross(vec1, vec2)
-        arg1 = np.sum(np.multiply(vec1, cross1)) * \
-               np.sqrt(np.sum(vec2**2))
-        arg2 = np.sum(np.multiply(cross1, cross2))
-        answer = np.arctan2(arg1, arg2)
+        # vec1 = xyz[b] - xyz[a]
+        # vec2 = xyz[c] - xyz[b]
+        # vec3 = xyz[d] - xyz[c]
+        # cross1 = fast_cross(vec2, vec3)
+        # cross2 = fast_cross(vec1, vec2)
+        # arg1 = fast_sum(np.multiply(vec1, cross1)) * \
+        #        np.sqrt(fast_sum(vec2**2))
+        # arg2 = fast_sum(np.multiply(cross1, cross2))
+        # answer = np.arctan2(arg1, arg2)
+        answer = nb_dih_val_inner(xyz, a, b, c, d)
         return answer
     
     def derivative(self, xyz):
         xyz = xyz.reshape(-1,3)
-        derivatives = np.zeros_like(xyz)
+        # derivatives = np.zeros_like(xyz)
         m = self.a
         o = self.b
         p = self.c
         n = self.d
-        u_prime = (xyz[m] - xyz[o])
-        w_prime = (xyz[p] - xyz[o])
-        v_prime = (xyz[n] - xyz[p])
-        u_norm = np.linalg.norm(u_prime)
-        w_norm = np.linalg.norm(w_prime)
-        v_norm = np.linalg.norm(v_prime)
-        u = u_prime / u_norm
-        w = w_prime / w_norm
-        v = v_prime / v_norm
-        if (1 - np.dot(u, w)**2) < 1e-6:
-            term1 = np.cross(u, w) * 0
-            term3 = np.cross(u, w) * 0
-        else:
-            term1 = np.cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
-            term3 = np.cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
-        if (1 - np.dot(v, w)**2) < 1e-6:
-            term2 = np.cross(v, w) * 0
-            term4 = np.cross(v, w) * 0
-        else:
-            term2 = np.cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
-            term4 = np.cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
-        # term1 = np.cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
-        # term2 = np.cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
-        # term3 = np.cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
-        # term4 = np.cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
-        derivatives[m, :] = term1
-        derivatives[n, :] = -term2
-        derivatives[o, :] = -term1 + term3 - term4
-        derivatives[p, :] = term2 - term3 + term4
+        # u_prime = (xyz[m] - xyz[o])
+        # w_prime = (xyz[p] - xyz[o])
+        # v_prime = (xyz[n] - xyz[p])
+        # u_norm = np.linalg.norm(u_prime)
+        # w_norm = np.linalg.norm(w_prime)
+        # v_norm = np.linalg.norm(v_prime)
+        # u = u_prime / u_norm
+        # w = w_prime / w_norm
+        # v = v_prime / v_norm
+        # if (1 - np.dot(u, w)**2) < 1e-6:
+        #     term1 = fast_cross(u, w) * 0
+        #     term3 = fast_cross(u, w) * 0
+        # else:
+        #     term1 = fast_cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
+        #     term3 = fast_cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
+        # if (1 - np.dot(v, w)**2) < 1e-6:
+        #     term2 = fast_cross(v, w) * 0
+        #     term4 = fast_cross(v, w) * 0
+        # else:
+        #     term2 = fast_cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
+        #     term4 = fast_cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
+        # # term1 = fast_cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
+        # # term2 = fast_cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
+        # # term3 = fast_cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
+        # # term4 = fast_cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
+        # derivatives[m, :] = term1
+        # derivatives[n, :] = -term2
+        # derivatives[o, :] = -term1 + term3 - term4
+        # derivatives[p, :] = term2 - term3 + term4
+        derivatives = nb_dih_deri_inner(xyz, m, o, p,n)
         return derivatives
 
     def second_derivative(self, xyz):
@@ -1364,16 +1492,16 @@ class Dihedral(PrimitiveCoordinate):
         u = u_prime / lu
         w = w_prime / lw
         v = v_prime / lv
-        cu = np.dot(u, w)
-        su = (1 - np.dot(u, w)**2)**0.5
+        cu = fast_dot(u, w)
+        su = (1 - fast_dot(u, w)**2)**0.5
         su4 = su**4
-        cv = np.dot(v, w)
-        sv = (1 - np.dot(v, w)**2)**0.5
+        cv = fast_dot(v, w)
+        sv = (1 - fast_dot(v, w)**2)**0.5
         sv4 = sv**4
         if su < 1e-6 or sv < 1e-6 : return deriv2
         
-        uxw = np.cross(u, w)
-        vxw = np.cross(v, w)
+        uxw = fast_cross(u, w)
+        vxw = fast_cross(v, w)
 
         term1 = np.outer(uxw, w*cu - u)/(lu**2*su4)
         term2 = np.outer(vxw, -w*cv + v)/(lv**2*sv4)
@@ -1499,11 +1627,11 @@ class MultiDihedral(PrimitiveCoordinate): # pragma: no cover
         vec1 = xyz[b] - xyza
         vec2 = xyz[c] - xyz[b]
         vec3 = xyzd - xyz[c]
-        cross1 = np.cross(vec2, vec3)
-        cross2 = np.cross(vec1, vec2)
-        arg1 = np.sum(np.multiply(vec1, cross1)) * \
-               np.sqrt(np.sum(vec2**2))
-        arg2 = np.sum(np.multiply(cross1, cross2))
+        cross1 = fast_cross(vec2, vec3)
+        cross2 = fast_cross(vec1, vec2)
+        arg1 = fast_sum(np.multiply(vec1, cross1)) * \
+               np.sqrt(fast_sum(vec2**2))
+        arg2 = fast_sum(np.multiply(cross1, cross2))
         answer = np.arctan2(arg1, arg2)
         return answer
     
@@ -1526,22 +1654,22 @@ class MultiDihedral(PrimitiveCoordinate): # pragma: no cover
         u = u_prime / u_norm
         w = w_prime / w_norm
         v = v_prime / v_norm
-        if (1 - np.dot(u, w)**2) < 1e-6:
-            term1 = np.cross(u, w) * 0
-            term3 = np.cross(u, w) * 0
+        if (1 - fast_dot(u, w)**2) < 1e-6:
+            term1 = fast_cross(u, w) * 0
+            term3 = fast_cross(u, w) * 0
         else:
-            term1 = np.cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
-            term3 = np.cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
-        if (1 - np.dot(v, w)**2) < 1e-6:
-            term2 = np.cross(v, w) * 0
-            term4 = np.cross(v, w) * 0
+            term1 = fast_cross(u, w) / (u_norm * (1 - fast_dot(u, w)**2))
+            term3 = fast_cross(u, w) * fast_dot(u, w) / (w_norm * (1 - fast_dot(u, w)**2))
+        if (1 - fast_dot(v, w)**2) < 1e-6:
+            term2 = fast_cross(v, w) * 0
+            term4 = fast_cross(v, w) * 0
         else:
-            term2 = np.cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
-            term4 = np.cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
-        # term1 = np.cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
-        # term2 = np.cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
-        # term3 = np.cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
-        # term4 = np.cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
+            term2 = fast_cross(v, w) / (v_norm * (1 - fast_dot(v, w)**2))
+            term4 = fast_cross(v, w) * fast_dot(v, w) / (w_norm * (1 - fast_dot(v, w)**2))
+        # term1 = fast_cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
+        # term2 = fast_cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
+        # term3 = fast_cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
+        # term4 = fast_cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
         for i in self.a:
             derivatives[i, :] = term1/len(self.a)
         for i in self.d:
@@ -1597,11 +1725,11 @@ class OutOfPlane(PrimitiveCoordinate):
         vec1 = xyz[b] - xyz[a]
         vec2 = xyz[c] - xyz[b]
         vec3 = xyz[d] - xyz[c]
-        cross1 = np.cross(vec2, vec3)
-        cross2 = np.cross(vec1, vec2)
-        arg1 = np.sum(np.multiply(vec1, cross1)) * \
-               np.sqrt(np.sum(vec2**2))
-        arg2 = np.sum(np.multiply(cross1, cross2))
+        cross1 = fast_cross(vec2, vec3)
+        cross2 = fast_cross(vec1, vec2)
+        arg1 = fast_sum(np.multiply(vec1, cross1)) * \
+               np.sqrt(fast_sum(vec2**2))
+        arg2 = fast_sum(np.multiply(cross1, cross2))
         answer = np.arctan2(arg1, arg2)
         return answer
         
@@ -1621,22 +1749,22 @@ class OutOfPlane(PrimitiveCoordinate):
         u = u_prime / u_norm
         w = w_prime / w_norm
         v = v_prime / v_norm
-        if (1 - np.dot(u, w)**2) < 1e-6:
-            term1 = np.cross(u, w) * 0
-            term3 = np.cross(u, w) * 0
+        if (1 - fast_dot(u, w)**2) < 1e-6:
+            term1 = fast_cross(u, w) * 0
+            term3 = fast_cross(u, w) * 0
         else:
-            term1 = np.cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
-            term3 = np.cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
-        if (1 - np.dot(v, w)**2) < 1e-6:
-            term2 = np.cross(v, w) * 0
-            term4 = np.cross(v, w) * 0
+            term1 = fast_cross(u, w) / (u_norm * (1 - fast_dot(u, w)**2))
+            term3 = fast_cross(u, w) * fast_dot(u, w) / (w_norm * (1 - fast_dot(u, w)**2))
+        if (1 - fast_dot(v, w)**2) < 1e-6:
+            term2 = fast_cross(v, w) * 0
+            term4 = fast_cross(v, w) * 0
         else:
-            term2 = np.cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
-            term4 = np.cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
-        # term1 = np.cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
-        # term2 = np.cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
-        # term3 = np.cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
-        # term4 = np.cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
+            term2 = fast_cross(v, w) / (v_norm * (1 - fast_dot(v, w)**2))
+            term4 = fast_cross(v, w) * fast_dot(v, w) / (w_norm * (1 - fast_dot(v, w)**2))
+        # term1 = fast_cross(u, w) / (u_norm * (1 - np.dot(u, w)**2))
+        # term2 = fast_cross(v, w) / (v_norm * (1 - np.dot(v, w)**2))
+        # term3 = fast_cross(u, w) * np.dot(u, w) / (w_norm * (1 - np.dot(u, w)**2))
+        # term4 = fast_cross(v, w) * np.dot(v, w) / (w_norm * (1 - np.dot(v, w)**2))
         derivatives[m, :] = term1
         derivatives[n, :] = -term2
         derivatives[o, :] = -term1 + term3 - term4
@@ -1732,7 +1860,7 @@ class InternalCoordinates(object):
         given by G = BuBt where u is an arbitrary matrix (default to identity)
         """
         Bmat = self.wilsonB(xyz)
-        BuBt = np.dot(Bmat,Bmat.T)
+        BuBt = fast_dot(Bmat,Bmat.T)
         return BuBt
 
     def GInverse_SVD(self, xyz):
@@ -1744,7 +1872,7 @@ class InternalCoordinates(object):
             try:
                 G = self.GMatrix(xyz)
                 time_G = click()
-                U, S, VT = np.linalg.svd(G)
+                U, S, VT = fast_svd(G)
                 time_svd = click()
             except np.linalg.LinAlgError:
                 logger.warning("\x1b[1;91m SVD fails, perturbing coordinates and trying again\x1b[0m\n")
@@ -1776,7 +1904,8 @@ class InternalCoordinates(object):
         click()
         G = self.GMatrix(xyz)
         time_G = click()
-        Gi = np.linalg.inv(G)
+        # Gi = np.linalg.inv(G)
+        Gi = fast_inv(G)
         time_inv = click()
         # print "G-time: %.3f Inv-time: %.3f" % (time_G, time_inv)
         return Gi
@@ -2200,7 +2329,7 @@ class PrimitiveInternalCoordinates(InternalCoordinates):
                                 nac = molecule.xyzs[0][c] - molecule.xyzs[0][a]
                                 nac /= np.linalg.norm(nac)
                                 # Dot products of this vector with the Cartesian axes
-                                dots = [np.abs(np.dot(ei, nac)) for ei in np.eye(3)]
+                                dots = [np.abs(fast_dot(ei, nac)) for ei in np.eye(3)]
                                 # Functions for adding Cartesian coordinate
                                 # carts = [CartesianX, CartesianY, CartesianZ]
                                 trans = [TranslationX, TranslationY, TranslationZ]
@@ -2223,7 +2352,7 @@ class PrimitiveInternalCoordinates(InternalCoordinates):
                                 Ang2 = Angle(i,j,k)
                                 if np.abs(np.cos(Ang1.value(coords))) > LinThre: continue
                                 if np.abs(np.cos(Ang2.value(coords))) > LinThre: continue
-                                if np.abs(np.dot(Ang1.normal_vector(coords), Ang2.normal_vector(coords))) > LinThre:
+                                if np.abs(fast_dot(Ang1.normal_vector(coords), Ang2.normal_vector(coords))) > LinThre:
                                     self.delete(Angle(i, b, j))
                                     self.add(OutOfPlane(b, i, j, k))
                                     break
@@ -2469,7 +2598,7 @@ class PrimitiveInternalCoordinates(InternalCoordinates):
             x3 = coords[k]
             v1 = x1-x2
             v2 = x3-x2
-            n = np.dot(v1,v2)/(np.linalg.norm(v1)*np.linalg.norm(v2))
+            n = fast_dot(v1,v2)/(np.linalg.norm(v1)*np.linalg.norm(v2))
             angle = np.arccos(n)
             return angle * 180/ np.pi
 
@@ -2774,7 +2903,7 @@ class PrimitiveInternalCoordinates(InternalCoordinates):
                 r1 = xyzs[ic.b]-xyzs[ic.a]
                 r2 = xyzs[ic.c]-xyzs[ic.a]
                 r3 = xyzs[ic.d]-xyzs[ic.a]
-                d = 1 - np.abs(np.dot(r1,np.cross(r2,r3))/np.linalg.norm(r1)/np.linalg.norm(r2)/np.linalg.norm(r3))
+                d = 1 - np.abs(fast_dot(r1,fast_cross(r2,r3))/np.linalg.norm(r1)/np.linalg.norm(r2)/np.linalg.norm(r3))
                 # Hdiag.append(0.1)
                 if covalent(ic.a, ic.b) and covalent(ic.a, ic.c) and covalent(ic.a, ic.d):
                     Hdiag.append(0.045)
@@ -3080,7 +3209,7 @@ class DelocalizedInternalCoordinates(InternalCoordinates):
                 cVec = np.array(cVec)
                 cVec /= np.linalg.norm(cVec)
                 # This is a "new DLC" that corresponds to the primitive that we are constraining
-                cProj = np.dot(self.Vecs,cVec.T)
+                cProj = fast_dot(self.Vecs,cVec.T)
                 cProj /= np.linalg.norm(cProj)
                 V.append(np.array(cProj).flatten())
                 # print c, cProj[iPrim]
@@ -3095,7 +3224,7 @@ class DelocalizedInternalCoordinates(InternalCoordinates):
                     v = V[:, iv].flatten()
                     U.append(v.copy())
                     for ui in U[:-1]:
-                        U[-1] -= ui * np.dot(ui, v)
+                        U[-1] -= ui * fast_dot(ui, v)
                     if np.linalg.norm(U[-1]) < thre:
                         U = U[:-1]
                         continue
@@ -3403,13 +3532,13 @@ class DelocalizedInternalCoordinates(InternalCoordinates):
     def calcDiff(self, coord1, coord2):
         """ Calculate difference in internal coordinates (coord1-coord2), accounting for changes in 2*pi of angles. """
         PMDiff = self.Prims.calcDiff(coord1, coord2)
-        Answer = np.dot(PMDiff, self.Vecs)
+        Answer = fast_dot(PMDiff, self.Vecs)
         return np.array(Answer).flatten()
 
     def calculate(self, coords):
         """ Calculate the DLCs given the Cartesian coordinates. """
         PrimVals = self.Prims.calculate(coords)
-        Answer = np.dot(PrimVals, self.Vecs)
+        Answer = fast_dot(PrimVals, self.Vecs)
         # To obtain the primitive coordinates from the delocalized internal coordinates,
         # simply multiply self.Vecs*Answer.T where Answer.T is the column vector of delocalized
         # internal coordinates. That means the "c's" in Equation 23 of Schlegel's review paper
@@ -3560,7 +3689,7 @@ class RMSDisplacement(PrimitiveCoordinate):
         if self.head is not None: xyz[0]  = self.head.copy()
         if self.tail is not None: xyz[-1] = self.tail.copy()
         PMDiff = self.Prims.calcDiff(xyz[self.imgDisp], xyz[self.imgRef])
-        return self.w*np.sqrt(np.dot(PMDiff, PMDiff))
+        return self.w*np.sqrt(fast_dot(PMDiff, PMDiff))
 
     def derivative(self, xyz):
         xyz = xyz.reshape(-1,self.na,3)
