@@ -119,8 +119,8 @@ class Optimizer(object):
         self.lowq_tr_limit = 1
         # Recalculate the Hessian after a trigger - for example if the energy changes by a lot during TS optimization.
         self.recalcHess = False
-        if print_info:
-            self.print_info()
+        # if print_info:
+            # self.print_info()
         
     def print_info(self):
         params = self.params
@@ -832,19 +832,13 @@ def run_optimizer(**kwargs):
         arg = arg.replace('}\'','}').replace('}','}\'')
         argv_print.append(arg)
     logger.info(' '.join(argv_print)+'\n')
-    print_logo(logger)
     now = datetime.now()
-    logger.info('-=# \x1b[1;94m geomeTRIC started. Version: %s \x1b[0m #=-\n' % (geometric.__version__))
-    logger.info('Current date and time: %s\n' % now.strftime("%Y-%m-%d %H:%M:%S"))
-    
-    if backed_up:
-        logger.info('Backed up existing log file: %s -> %s\n' % (logfilename, os.path.basename(backed_up)))
 
     t0 = time.time()
 
     # Create the params object, containing data to be passed into the optimizer
     params = OptParams(**kwargs)
-    params.printInfo()
+    # params.printInfo()
 
     # Create "dirname" folder for writing
     dirname = prefix+".tmp"
@@ -904,10 +898,6 @@ def run_optimizer(**kwargs):
         M.top_settings['read_bonds'] = True
         # Delete the QM bond order to avoid problems when more structures are added
         del M.Data['qm_bondorder']
-    else:
-        if coordsys.lower() in ['hdlc', 'tric'] and params.bothre > 1e-3:
-            logger.info("Requested bond order-based connectivity but it is not available in the current engine\n")
-        logger.info("Bonds will be generated from interatomic distances less than %.2f times sum of covalent radii\n" % M.top_settings['Fac'])
 
     IC = CoordClass(M, build=True, connect=connect, addcart=addcart, constraints=Cons, cvals=CVals[0] if CVals is not None else None,
                     conmethod=params.conmethod)
@@ -929,30 +919,6 @@ def run_optimizer(**kwargs):
         check_internal_grad(coords, M, IC.Prims, engine, dirname, verbose)
         check_internal_hess(coords, M, IC.Prims, engine, dirname, verbose)
         return
-
-    # Print out information about the coordinate system
-    if isinstance(IC, CartesianCoordinates):
-        logger.info("%i Cartesian coordinates being used\n" % (3*M.na))
-    else:
-        logger.info("%i internal coordinates being used (instead of %i Cartesians)\n" % (len(IC.Internals), 3*M.na))
-    logger.info(IC)
-    logger.info("\n")
-
-    # Print out a note if DFT is used for non-fragmented systems; recommend --dlc and --subfrctor 2.
-    if engine.detect_dft() and coordsys != "dlc" and len(IC.frags) == 1:
-        logger.info("#===================================================================================#\n")
-        logger.info("#| \x1b[91mNote: Detected the use of DFT for a system containing only one fragment.\x1b[0m        |#\n")
-        logger.info("#|                                                                                 |#\n")
-        logger.info("#| DFT calculations that use small to medium-sized grids can sometimes result in   |#\n")
-        logger.info("#| energies and/or gradients that are not translationally/rotationally invariant,  |#\n")
-        logger.info("#| which varies depending on the QC program used.                                  |#\n")
-        logger.info("#|                                                                                 |#\n")
-        logger.info("#| Spurious translation/rotation contributions to the energy and/or gradient       |#\n")
-        logger.info("#| may cause convergence failure that is observable as 'movement' or 'tumbling'    |#\n")
-        logger.info("#| of the molecule in the optimization output. If observed, rerun the calculation  |#\n")
-        logger.info("#| using --coordsys dlc and --subfrctor 2. It will project out overall translation |#\n")
-        logger.info("#| and rotation from the optimization space.                                       |#\n")
-        logger.info("#===================================================================================#\n")
 
     if Cons is None:
         # Run a standard geometry optimization
@@ -993,7 +959,6 @@ def run_optimizer(**kwargs):
         if len(CVals) > 1:
             Mfinal.write('scan-final.xyz')
             if params.qdata is not None: Mfinal.write('qdata-final.txt')
-    print_citation(logger)
     logger.info("Time elapsed since start of run_optimizer: %.3f seconds\n" % (time.time()-t0))
     if kwargs.get('port', 0):
         destroyWorkQueue()
