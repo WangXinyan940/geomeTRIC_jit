@@ -224,7 +224,12 @@ def sorted_eigh(mat, asc=False):
     This is just a convenience function to get eigenvectors
     in descending or ascending order as desired.
     """
-    L, Q = np.linalg.eigh(mat)
+    try:
+        L, Q = np.linalg.eigh(mat)
+    except np.linalg.LinAlgError as e:
+        logger.warning("LinAlgError encountered in sorted_eigh, attempting to recover.")
+        logger.warning("Error message: {}".format(e))
+        L, Q = np.linalg.eigh(mat + 1e-5*np.eye(mat.shape[0]))
     if asc:
         idx = L.argsort()
     else:
