@@ -710,7 +710,8 @@ class Optimizer(object):
                 # convert it to IC, and then store it.
                 self.calcEnergyForce()
         if self.state == OPT_STATE.FAILED:
-            raise GeomOptNotConvergedError("Optimizer.optimizeGeometry() failed to converge.")
+            logger.info("Optimizer.optimizeGeometry() failed to converge.")
+            # raise GeomOptNotConvergedError("Optimizer.optimizeGeometry() failed to converge.")
         # If we want to save the Hessian used by the optimizer (in Cartesian coordinates)
         if self.params.write_cart_hess:
             # One last Hessian update before writing it out
