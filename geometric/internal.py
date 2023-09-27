@@ -56,7 +56,12 @@ def fast_dot(A, B):
 
 @nb.njit
 def fast_svd(G):
-    U, S, VT = np.linalg.svd(G)
+    try:
+        U, S, VT = np.linalg.svd(G)
+    except ValueError as e:
+        print(f"Error in fast_svd: {e}")
+        Gp = G + 1e-6*(np.random.random(G.shape) - 0.5)
+        U, S, VT = np.linalg.svd(Gp)
     return U, S, VT
 
 @nb.njit
