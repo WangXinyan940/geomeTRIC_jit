@@ -56,12 +56,7 @@ def fast_dot(A, B):
 
 @nb.njit
 def fast_svd(G):
-    try:
-        U, S, VT = np.linalg.svd(G)
-    except ValueError as e:
-        print(f"Error in fast_svd: {e}")
-        Gp = G + 1e-6*(np.random.random(G.shape) - 0.5)
-        U, S, VT = np.linalg.svd(Gp)
+    U, S, VT = np.linalg.svd(G)
     return U, S, VT
 
 @nb.njit
@@ -1894,7 +1889,12 @@ class InternalCoordinates(object):
             try:
                 G = self.GMatrix(xyz)
                 time_G = click()
-                U, S, VT = fast_svd(G)
+                try:
+                    U, S, VT = fast_svd(G)
+                except BaseException as e:
+                    print(f"Error in SVD: {e}")
+                    Gp = G + 2e-6*(np.random.random(G.shape) - 0.5)
+                    U, S, VT = fast_svd(Gp)
                 time_svd = click()
             except np.linalg.LinAlgError:
                 logger.warning("\x1b[1;91m SVD fails, perturbing coordinates and trying again\x1b[0m\n")
