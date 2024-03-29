@@ -341,7 +341,8 @@ def get_config_from_root(root):
     setup_cfg = os.path.join(root, "setup.cfg")
     parser = configparser.ConfigParser()
     with open(setup_cfg, "r") as f:
-        parser.readfp(f)
+        cfg_string = "".join(f.readlines())
+    parser.read_string(cfg_string)
     VCS = parser.get("versioneer", "VCS")  # mandatory
 
     def get(parser, name):
